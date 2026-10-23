@@ -10,8 +10,7 @@ namespace HacettepeNot.API.Controllers
     {
         IWebHostEnvironment _env;
         // Firebase Realtime Database URL'ini buraya kendi proje adresinle yazıyoruz
-        private readonly FirebaseClient _firebaseClient = new("https://hacetttepenot-be247-default-rtdb.firebaseio.com/");
-
+private readonly FirebaseClient _firebaseClient = new("https://hacettepenot-be247-default-rtdb.firebaseio.com/");
         public NotesController(IWebHostEnvironment env)
         {
             _env = env;

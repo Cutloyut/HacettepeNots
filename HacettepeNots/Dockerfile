@@ -6,8 +6,8 @@ WORKDIR /src
 COPY . .
 
 # Projeyi restore et ve derle
-RUN dotnet restore "HacettepeNot.csproj"
-RUN dotnet publish "HacettepeNot.csproj" -c Release -o /app/publish
+RUN dotnet restore "HacettepeNots/HacettepeNots.csproj"
+RUN dotnet publish "HacettepeNots/HacettepeNots.csproj" -c Release -o /app/publish
 
 # Çalıştırma Aşaması
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
@@ -17,5 +17,5 @@ COPY --from=build /app/publish .
 EXPOSE 8080
 ENV ASPNETCORE_URLS=http://+:8080
 
-# Çıktı DLL adı tam olarak HacettepeNot.dll
-ENTRYPOINT ["dotnet", "HacettepeNot.dll"]
+# Çıktı DLL adı
+ENTRYPOINT ["dotnet", "HacettepeNots.dll"]

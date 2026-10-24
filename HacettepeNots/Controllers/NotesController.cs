@@ -32,7 +32,6 @@ namespace HacettepeNot.API.Controllers
             {
                 Console.WriteLine("--> Notları listeleme isteği alındı...");
                 
-                // Realtime Database "notes" düğümündeki tüm kayıtları okuyoruz
                 var notes = await _firebaseClient
                     .Child("notes")
                     .OnceAsync<NoteRecordDto>();
@@ -46,6 +45,8 @@ namespace HacettepeNot.API.Controllers
                     Title = item.Object.Title,
                     Uploader = item.Object.Uploader,
                     FilePath = item.Object.FilePath,
+                    Department = item.Object.Department,
+                    Grade = item.Object.Grade,
                     CreatedAt = item.Object.CreatedAt
                 }).OrderByDescending(x => x.CreatedAt).ToList();
 
@@ -68,18 +69,8 @@ namespace HacettepeNot.API.Controllers
         {
             Console.WriteLine("==========================================");
             Console.WriteLine("==> /api/notes/upload ENDPOINTINE İSTEK GELDİ! <==");
-            Console.WriteLine($"==> Başlık: {request.Title}, Ders: {request.CourseCode}");
+            Console.WriteLine($"==> Başlık: {request.Title}, Ders: {request.CourseCode}, Bölüm: {request.Department}, Sınıf: {request.Grade}");
             
-            if (request.File != null)
-            {
-                Console.WriteLine($"==> Gelen Dosya: {request.File.FileName} ({request.File.Length} bayt)");
-            }
-            else
-            {
-                Console.WriteLine("==> ❌ UYARI: Gelen dosya (File) NULL!");
-            }
-            Console.WriteLine("==========================================");
-
             if (request.File == null || request.File.Length == 0)
             {
                 return BadRequest(new { Success = false, Message = "Lütfen geçerli bir dosya seçin." });
@@ -119,7 +110,7 @@ namespace HacettepeNot.API.Controllers
                 return StatusCode(500, new { Success = false, Message = "Firebase Storage hatası: " + ex.Message });
             }
 
-            // Step 2: Dönen URL ile veri modelini hazırlıyoruz
+            // Step 2: Dönen URL ve yeni alanlarla (Department, Grade) veri modelini hazırlıyoruz
             var newNoteRecord = new NoteRecordDto
             {
                 Id = Guid.NewGuid().ToString(),
@@ -128,6 +119,8 @@ namespace HacettepeNot.API.Controllers
                 Title = request.Title,
                 Uploader = request.Uploader,
                 FilePath = downloadUrl,
+                Department = request.Department ?? string.Empty,
+                Grade = request.Grade ?? string.Empty,
                 CreatedAt = DateTime.UtcNow
             };
 
@@ -149,19 +142,21 @@ namespace HacettepeNot.API.Controllers
 
             return Ok(new { 
                 Success = true, 
-                Message = "Dosya başarıyla Storage'a yüklendi ve veritabanına kaydedildi.", 
+                Message = "Dosya başarıyla yüklendi ve kaydedildi.", 
                 Data = newNoteRecord 
             });
         }
     }
 
-    // Flutter'dan dosya gönderirken kullanılan DTO
+    // Flutter'dan dosya gönderirken kullanılan DTO (Bölüm ve Sınıf eklendi)
     public class NoteUploadDto
     {
         public string CourseCode { get; set; } = string.Empty;
         public string ContentType { get; set; } = string.Empty;
         public string Title { get; set; } = string.Empty;
         public string Uploader { get; set; } = string.Empty;
+        public string Department { get; set; } = string.Empty;
+        public string Grade { get; set; } = string.Empty;
         public IFormFile? File { get; set; }
     }
 
@@ -173,7 +168,9 @@ namespace HacettepeNot.API.Controllers
         public string ContentType { get; set; } = string.Empty;
         public string Title { get; set; } = string.Empty;
         public string Uploader { get; set; } = string.Empty;
-        public string FilePath { get; set; } = string.Empty;
+        public string FilePath { get.Set; } = string.Empty; // Not: string.Empty olacak şekilde düzeltilmiştir
+        public string Department { get; set; } = string.Empty;
+        public string Grade { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }
     }
 }

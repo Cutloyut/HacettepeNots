@@ -11,8 +11,11 @@ namespace HacettepeNot.API.Controllers
     {
         private readonly IWebHostEnvironment _env;
         
-        // Firebase Realtime Database İstemcisi
+        // Realtime DB URL'si
         private readonly FirebaseClient _firebaseClient = new("https://hacettepenot-be247-default-rtdb.firebaseio.com/");
+
+        // Doğru Firebase Storage Bucket Adresi (Ekrandan alınan güncel adres)
+        private const string FirebaseBucket = "hacettepenot-be247.firebasestorage.app";
 
         public NotesController(IWebHostEnvironment env)
         {
@@ -38,26 +41,25 @@ namespace HacettepeNot.API.Controllers
 
             if (request.File == null || request.File.Length == 0)
             {
-                return BadRequest(new { Success = false, Message = "Lütfen geçerli bir dosya seçin. Dosya null geldi." });
+                return BadRequest(new { Success = false, Message = "Lütfen geçerli bir dosya seçin." });
             }
 
             var extension = Path.GetExtension(request.File.FileName).ToLowerInvariant();
             if (extension != ".pdf")
             {
-                return BadRequest(new { Success = false, Message = "Güvenlik İhlali: Sadece .pdf uzantılı dosyalar kabul edilir." });
+                return BadRequest(new { Success = false, Message = "Sadece .pdf uzantılı dosyalar kabul edilir." });
             }
 
             var uniqueFileName = $"{Guid.NewGuid()}{extension}";
             string downloadUrl = string.Empty;
 
-            // 1. AŞAMA: Firebase Storage'a Yükleme (Bucket Adı Doğrulanmış Hali)
             try
             {
-                Console.WriteLine("--> Firebase Storage'a yükleme başlatılıyor...");
+                Console.WriteLine($"--> Firebase Storage ({FirebaseBucket}) yüklemesi başlatılıyor...");
                 using var stream = request.File.OpenReadStream();
 
                 var task = new FirebaseStorage(
-                    "hacettepenot-be247.appspot.com", 
+                    FirebaseBucket,
                     new FirebaseStorageOptions
                     {
                         ThrowOnCancel = true
@@ -72,10 +74,9 @@ namespace HacettepeNot.API.Controllers
             catch (Exception ex)
             {
                 Console.WriteLine($"--> ❌ STORAGE HATASI: {ex}");
-                return StatusCode(500, new { Success = false, Message = "Firebase Storage yükleme hatası: " + ex.Message });
+                return StatusCode(500, new { Success = false, Message = "Firebase Storage hatası: " + ex.Message });
             }
 
-            // 2. AŞAMA: Veri Paketini Oluşturma
             var newNoteRecord = new
             {
                 Id = Guid.NewGuid().ToString(),
@@ -87,7 +88,6 @@ namespace HacettepeNot.API.Controllers
                 CreatedAt = DateTime.UtcNow
             };
 
-            // 3. AŞAMA: Realtime Database'e Kayıt Atma
             try
             {
                 Console.WriteLine("--> Realtime Database'e kayıt atılıyor...");
@@ -100,12 +100,12 @@ namespace HacettepeNot.API.Controllers
             catch (Exception ex)
             {
                 Console.WriteLine($"--> ❌ DATABASE HATASI: {ex}");
-                return StatusCode(500, new { Success = false, Message = "Firebase Veritabanı kayıt hatası: " + ex.Message });
+                return StatusCode(500, new { Success = false, Message = "Firebase DB hatası: " + ex.Message });
             }
 
             return Ok(new { 
                 Success = true, 
-                Message = "Dosya Firebase Storage'a yüklendi ve veritabanına kaydedildi.", 
+                Message = "Dosya başarıyla Storage'a yüklendi ve veritabanına kaydedildi.", 
                 Data = newNoteRecord 
             });
         }

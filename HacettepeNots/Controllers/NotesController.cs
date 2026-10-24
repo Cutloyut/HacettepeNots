@@ -22,13 +22,25 @@ namespace HacettepeNot.API.Controllers
         [HttpPost("upload")]
         public async Task<IActionResult> UploadNote([FromForm] NoteUploadDto request)
         {
-            // 1. İstek Geldi mi Kontrolü
+            Console.WriteLine("==========================================");
+            Console.WriteLine("==> /api/notes/upload ENDPOINTINE İSTEK GELDİ! <==");
+            Console.WriteLine($"==> Başlık: {request.Title}, Ders: {request.CourseCode}");
+            
+            if (request.File != null)
+            {
+                Console.WriteLine($"==> Gelen Dosya: {request.File.FileName} ({request.File.Length} bayt)");
+            }
+            else
+            {
+                Console.WriteLine("==> ❌ UYARI: Gelen dosya (File) NULL!");
+            }
+            Console.WriteLine("==========================================");
+
             if (request.File == null || request.File.Length == 0)
             {
-                return BadRequest(new { Success = false, Message = "Lütfen geçerli bir dosya seçin." });
+                return BadRequest(new { Success = false, Message = "Lütfen geçerli bir dosya seçin. Dosya null geldi." });
             }
 
-            // 2. Uzantı Güvenlik Kontrolü (Sadece PDF)
             var extension = Path.GetExtension(request.File.FileName).ToLowerInvariant();
             if (extension != ".pdf")
             {
@@ -38,14 +50,15 @@ namespace HacettepeNot.API.Controllers
             var uniqueFileName = $"{Guid.NewGuid()}{extension}";
             string downloadUrl = string.Empty;
 
-            // 3. AŞAMA: Önce Firebase Storage'a Yükleme ve Linki Alma
+            // 1. AŞAMA: Firebase Storage'a Yükleme (Bucket Adı Doğrulanmış Hali)
             try
             {
-                Console.WriteLine("--> Storage yüklemesi başlatıldı: " + request.File.FileName);
-                
+                Console.WriteLine("--> Firebase Storage'a yükleme başlatılıyor...");
                 using var stream = request.File.OpenReadStream();
 
-                var task = new FirebaseStorage("hacettepenot-be247.appspot.com", new FirebaseStorageOptions
+                var task = new FirebaseStorage(
+                    "hacettepenot-be247.appspot.com", 
+                    new FirebaseStorageOptions
                     {
                         ThrowOnCancel = true
                     })
@@ -53,18 +66,16 @@ namespace HacettepeNot.API.Controllers
                     .Child(uniqueFileName)
                     .PutAsync(stream);
 
-                // Dosyanın internet üzerinden erişileceği kalıcı URL adresi bekleniyor
                 downloadUrl = await task;
-                
-                Console.WriteLine("--> ✅ Storage yüklemesi başarılı. Alınan Link: " + downloadUrl);
+                Console.WriteLine($"--> ✅ Storage yükleme BAŞARILI. URL: {downloadUrl}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine("--> ❌ STORAGE HATASI: " + ex.ToString());
+                Console.WriteLine($"--> ❌ STORAGE HATASI: {ex}");
                 return StatusCode(500, new { Success = false, Message = "Firebase Storage yükleme hatası: " + ex.Message });
             }
 
-            // 4. AŞAMA: Storage'dan dönen Linki Veri Modelimize Dahil Etme
+            // 2. AŞAMA: Veri Paketini Oluşturma
             var newNoteRecord = new
             {
                 Id = Guid.NewGuid().ToString(),
@@ -72,11 +83,11 @@ namespace HacettepeNot.API.Controllers
                 ContentType = request.ContentType,
                 Title = request.Title,
                 Uploader = request.Uploader,
-                FilePath = downloadUrl, // <-- Storage'dan dönen canlı URL buraya ekleniyor!
+                FilePath = downloadUrl,
                 CreatedAt = DateTime.UtcNow
             };
 
-            // 5. AŞAMA: Oluşan Bu Tam Paketi Realtime Database'e Yazma
+            // 3. AŞAMA: Realtime Database'e Kayıt Atma
             try
             {
                 Console.WriteLine("--> Realtime Database'e kayıt atılıyor...");
@@ -84,23 +95,22 @@ namespace HacettepeNot.API.Controllers
                     .Child("notes")
                     .PostAsync(newNoteRecord);
                 
-                Console.WriteLine("--> ✅ Database kayıt işlemi başarılı.");
+                Console.WriteLine("--> ✅ Database kayıt BAŞARILI.");
             }
             catch (Exception ex)
             {
-                Console.WriteLine("--> ❌ DATABASE HATASI: " + ex.ToString());
+                Console.WriteLine($"--> ❌ DATABASE HATASI: {ex}");
                 return StatusCode(500, new { Success = false, Message = "Firebase Veritabanı kayıt hatası: " + ex.Message });
             }
 
             return Ok(new { 
                 Success = true, 
-                Message = "Dosya önce Storage'a yüklendi, ardından link ile birlikte veritabanına kaydedildi.", 
+                Message = "Dosya Firebase Storage'a yüklendi ve veritabanına kaydedildi.", 
                 Data = newNoteRecord 
             });
         }
     }
 
-    // Flutter'dan gelen multipart verileri karşılayan model
     public class NoteUploadDto
     {
         public string CourseCode { get; set; } = string.Empty;

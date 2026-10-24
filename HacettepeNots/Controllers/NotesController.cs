@@ -161,18 +161,14 @@ namespace HacettepeNot.API.Controllers
     }
 
     // Realtime Database kayıt ve okuma DTO'su
-  public class NoteRecordDto
+    public class NoteRecordDto
     {
         public string Id { get; set; } = string.Empty;
         public string CourseCode { get; set; } = string.Empty;
         public string ContentType { get; set; } = string.Empty;
         public string Title { get; set; } = string.Empty;
-        public string Uploader { get; set: } = string.Empty; // Burası düzeltildi (= yerine :)
-        
-        // ❌ ESKİ HATALI SATIR: public string FilePath { get.Set; } = string.Empty;
-        // ✅ DOĞRU SATIR:
+        public string Uploader { get; set; } = string.Empty; // Düzeltildi (= kullanıldı)
         public string FilePath { get; set; } = string.Empty; 
-
         public string Department { get; set; } = string.Empty;
         public string Grade { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }

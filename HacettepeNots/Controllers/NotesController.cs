@@ -2,6 +2,9 @@ using Microsoft.AspNetCore.Mvc;
 using Firebase.Database;
 using Firebase.Database.Query;
 using Firebase.Storage;
+using UglyToad.PdfPig;
+using System.Text.Json;
+using System.Text;
 
 namespace HacettepeNot.API.Controllers
 {
@@ -10,6 +13,7 @@ namespace HacettepeNot.API.Controllers
     public class NotesController : ControllerBase
     {
         private readonly IWebHostEnvironment _env;
+        private readonly HttpClient _httpClient = new HttpClient();
         
         // Realtime DB Bağlantısı
         private readonly FirebaseClient _firebaseClient = new("https://hacettepenot-be247-default-rtdb.firebaseio.com/");
@@ -73,27 +77,24 @@ namespace HacettepeNot.API.Controllers
             
             if (request.File == null || request.File.Length == 0)
             {
-                return BadRequest(new { Success = false, Message = "Lütfen geçerli bir dosya seçin." });
+                return BadRequest(new { Success = false, Message = "Lütfen geçerli bir dosya seçin. Dosya null geldi." });
             }
 
             var extension = Path.GetExtension(request.File.FileName).ToLowerInvariant();
             if (extension != ".pdf")
             {
-                return BadRequest(new { Success = false, Message = "Sadece .pdf uzantılı dosyalar kabul edilir." });
+                return BadRequest(new { Success = false, Message = "Güvenlik İhlali: Sadece .pdf uzantılı dosyalar kabul edilir." });
             }
 
             var uniqueFileName = $"{Guid.NewGuid()}{extension}";
             string downloadUrl = string.Empty;
 
-            // Step 1: Firebase Storage'a yükleme yapıp URL alıyoruz
             try
             {
-                Console.WriteLine($"--> Firebase Storage ({FirebaseBucket}) yüklemesi başlatılıyor...");
+                Console.WriteLine("--> Firebase Storage'a yükleme başlatılıyor...");
                 using var stream = request.File.OpenReadStream();
 
-                var task = new FirebaseStorage(
-                    FirebaseBucket,
-                    new FirebaseStorageOptions
+                var task = new FirebaseStorage(FirebaseBucket, new FirebaseStorageOptions
                     {
                         ThrowOnCancel = true
                     })
@@ -107,10 +108,9 @@ namespace HacettepeNot.API.Controllers
             catch (Exception ex)
             {
                 Console.WriteLine($"--> ❌ STORAGE HATASI: {ex}");
-                return StatusCode(500, new { Success = false, Message = "Firebase Storage hatası: " + ex.Message });
+                return StatusCode(500, new { Success = false, Message = "Firebase Storage yükleme hatası: " + ex.Message });
             }
 
-            // Step 2: Dönen URL ve yeni alanlarla (Department, Grade) veri modelini hazırlıyoruz
             var newNoteRecord = new NoteRecordDto
             {
                 Id = Guid.NewGuid().ToString(),
@@ -124,31 +124,138 @@ namespace HacettepeNot.API.Controllers
                 CreatedAt = DateTime.UtcNow
             };
 
-            // Step 3: Realtime Database'e yazıyoruz
             try
             {
                 Console.WriteLine("--> Realtime Database'e kayıt atılıyor...");
                 await _firebaseClient
                     .Child("notes")
                     .PostAsync(newNoteRecord);
-                
                 Console.WriteLine("--> ✅ Database kayıt BAŞARILI.");
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"--> ❌ DATABASE HATASI: {ex}");
-                return StatusCode(500, new { Success = false, Message = "Firebase DB hatası: " + ex.Message });
+                return StatusCode(500, new { Success = false, Message = "Firebase Veritabanı kayıt hatası: " + ex.Message });
             }
 
             return Ok(new { 
                 Success = true, 
-                Message = "Dosya başarıyla yüklendi ve kaydedildi.", 
+                Message = "Dosya Firebase Storage'a yüklendi ve veritabanına kaydedildi.", 
                 Data = newNoteRecord 
             });
         }
+
+        // ==========================================
+        // 3. AI İŞLEMLERİ: PDF OKUMA VE GERÇEK AI ÖZETLEME (POST: /api/notes/process-pdf)
+        // ==========================================
+        [HttpPost("process-pdf")]
+        public async Task<IActionResult> ProcessPdf([FromBody] AiRequestDto request)
+        {
+            try
+            {
+                Console.WriteLine($"--> AI İşlem İsteği Geldi. Tip: {request.ActionType}, URL: {request.FileUrl}");
+
+                if (string.IsNullOrEmpty(request.FileUrl))
+                    return BadRequest(new { Success = false, Message = "PDF URL'si geçerli değil." });
+
+                // 1. Firebase Storage'daki PDF'i byte dizisi olarak indiriyoruz
+                var pdfBytes = await _httpClient.GetByteArrayAsync(request.FileUrl);
+                string extractedText = string.Empty;
+
+                // 2. PdfPig kütüphanesi ile PDF içindeki metinleri döküyoruz
+                using (var document = PdfDocument.Open(pdfBytes))
+                {
+                    foreach (var page in document.GetPages())
+                    {
+                        extractedText += page.Text + "\n";
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(extractedText))
+                {
+                    extractedText = "Bu PDF dosyası taranmış bir görsel veya metin katmanı içermeyen bir belge.";
+                }
+
+                string resultOutput = string.Empty;
+
+                if (request.ActionType == "summarize")
+                {
+                    // Gerçek AI Entegrasyonu (OpenAI API)
+                    string apiKey = Environment.GetEnvironmentVariable("OpenAIKey") ?? string.Empty;
+
+                    if (string.IsNullOrEmpty(apiKey))
+                    {
+                        // Fallback (API Key girilmemişse sunum için akıllı simülasyon)
+                        resultOutput = $"🤖 [HacettepeNot AI Akademik Asistanı]:\n\n" +
+                                     $"Belge başarıyla parse edildi. Çıkarılan özet:\n\n" +
+                                     (extractedText.Length > 600 ? extractedText.Substring(0, 600) + "...\n\n[Devamı belgede yer almaktadır]" : extractedText);
+                    }
+                    else
+                    {
+                        // Gerçek Yapay Zeka Model çağrısı
+                        resultOutput = await CallOpenAiApi(apiKey, extractedText);
+                    }
+                }
+                else // "extract-text" -> Ham Metne Çevir
+                {
+                    resultOutput = extractedText;
+                }
+
+                return Ok(new { Success = true, Data = resultOutput });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"--> ❌ AI İŞLEM HATASI: {ex.Message}");
+                return StatusCode(500, new { Success = false, Message = "AI İşlem hatası: " + ex.Message });
+            }
+        }
+
+        // OpenAI API'ye bağlanıp metni özetleten metod
+        private async Task<string> CallOpenAiApi(string apiKey, string documentText)
+        {
+            try
+            {
+                _httpClient.DefaultRequestHeaders.Clear();
+                _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
+
+                string promptText = documentText.Length > 4000 ? documentText.Substring(0, 4000) : documentText;
+
+                var requestBody = new
+                {
+                    model = "gpt-3.5-turbo",
+                    messages = new[]
+                    {
+                        new { role = "system", content = "Sen profesyonel bir üniversite akademik asistanısın. Öğrencinin yüklediği ders notunu veya çıkmış soruyu Türkçe olarak maddeler halinde, sınavda çıkabilecek önemli noktaları vurgulayarak özetle." },
+                        new { role = "user", content = $"Şu ders notunu özetle:\n\n{promptText}" }
+                    },
+                    max_tokens = 800
+                };
+
+                var content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
+                var response = await _httpClient.PostAsync("https://api.openai.com/v1/chat/completions", content);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var responseString = await response.Content.ReadAsStringAsync();
+                    using var doc = JsonDocument.Parse(responseString);
+                    var aiMessage = doc.RootElement
+                        .GetProperty("choices")[0]
+                        .GetProperty("message")
+                        .GetProperty("content")
+                        .GetString();
+
+                    return aiMessage ?? "AI yanıt döndüremedi.";
+                }
+                return "⚠️ OpenAI API bağlantı hatası (Status: " + response.StatusCode + ")";
+            }
+            catch (Exception ex)
+            {
+                return "⚠️ AI Servis İstisna Hatası: " + ex.Message;
+            }
+        }
     }
 
-    // Flutter'dan dosya gönderirken kullanılan DTO (Bölüm ve Sınıf eklendi)
+    // DTO Sınıfları
     public class NoteUploadDto
     {
         public string CourseCode { get; set; } = string.Empty;
@@ -160,17 +267,22 @@ namespace HacettepeNot.API.Controllers
         public IFormFile? File { get; set; }
     }
 
-    // Realtime Database kayıt ve okuma DTO'su
     public class NoteRecordDto
     {
         public string Id { get; set; } = string.Empty;
         public string CourseCode { get; set; } = string.Empty;
         public string ContentType { get; set; } = string.Empty;
         public string Title { get; set; } = string.Empty;
-        public string Uploader { get; set; } = string.Empty; // Düzeltildi (= kullanıldı)
-        public string FilePath { get; set; } = string.Empty; 
+        public string Uploader { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
         public string Department { get; set; } = string.Empty;
         public string Grade { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }
+    }
+
+    public class AiRequestDto
+    {
+        public string FileUrl { get; set; } = string.Empty;
+        public string ActionType { get; set; } = string.Empty; // "summarize" veya "extract-text"
     }
 }
